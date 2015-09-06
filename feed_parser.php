@@ -3,10 +3,13 @@
  ======================================================================
  YouTube Feed Parser
  
- Takes a YouTube feed (user, channel, tag, whatever) and converts it into
+ Takes a YouTube playlistID (user, channel, tag, whatever) and converts it into
  an RSS feed your podcatcher can consume - saves videos in MP4 format. 
 
  I use this with Downcast.app on an iPad - your mileage may vary! 
+ 
+ NOTE: PocketCasts does not seem to work - you end up with the YouTube
+ Device Support video - my guess is they are doing some kind of caching. 
 
  ----------------------------------------------------------------------
  LICENSE
@@ -28,15 +31,19 @@
 // CONFIGURATION SECTION
 
 /*
- * Expects feeds from youtube like:
- * http://gdata.youtube.com/feeds/api/users/username/uploads
- * 
+ * Expects a playlist id from google, like: UUmppcorcR8KalBMF0EqgRZg
+ * And a server API key with YouTube API v3 enabled 
+ * Once you have a server API key, you can use this endpoint:
+ *  https://developers.google.com/apis-explorer/?hl=en_US#p/youtube/v3/youtube.channels.list
+ * filling in 'contentDetails' for part and the username in 'forUsername' to get
+ * the playlist ID for an uploads playlist
  */ 
-$source_feed = 'http://gdata.youtube.com/feeds/api/users/username/uploads';  //feed from YouTube
+$api_key = ''; // get this from google
+$playlist_id = '';
 $my_title = 'Title'; // plain text
 $my_description = 'Description'; // plain text
 $my_link = 'http://www.youtube.com/user/username/'; // full URL to show homepage 
-$my_install_url = 'http://example.com/yt/'; // url where script is installed
+$my_install_url = 'http://exmple.com/yt/'; // url where script is installed
 
 
 /* 
@@ -49,14 +56,21 @@ $itunes_image = 'http://example.com/photo.jpg';
 /* nothing to configure below here */ 
 
 include_once('curl.php');
-if ($rs = curlGet($source_feed)){
-	//print_r($rs); 
-} else { die('Error: Feed file not found, dude.'); }
+$my_videos = array(); 
 
-$my_videos = simplexml_load_string($rs); 
+// this gets a whole series of video IDs - what else do we need to gather? 
+if($rs = curlGet('https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId='. $playlist_id .'&maxResults=50&fields=items&key='. $api_key)) {
+	//var_dump($rs); 
+	$response = json_decode($rs);
+	foreach($response->items as $item) {
+		$my_videos[] = $item; 
+	}  
+} else { die('Error: feed not found for playlist id or other error occured'); } 
+
+//var_dump($my_videos); 
  
 /* write out the outer shell, channel, globals */ 
-$updated = $my_videos->updated;
+$updated = $my_videos[0]->snippet->publishedAt;
 $updated= date("D, d M Y H:i:s T", strtotime($updated));
 $output = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 	<rss version=\"2.0\" xmlns:itunes=\"http://www.itunes.com/dtds/podcast-1.0.dtd\"
@@ -83,19 +97,19 @@ $output = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 		
 /* now get the info on each item in the feed */ 
 foreach ($my_videos as $entry) {	
-	$pubDate = $entry->published; 
+	$pubDate = $entry->snippet->publishedAt; 
 	$pubDate= date("D, d M Y H:i:s T", strtotime($pubDate));
-	$videoid = explode('/',$entry->id); 
-	$item_url = htmlentities($entry->link[0]['href']); 
-	$item_title = htmlspecialchars($entry->title,ENT_QUOTES,'UTF-8');
-	$full_item_url = $my_install_url . $item_title . '.mp4?videoid='. end($videoid) .'&format=ipad';
+	$videoid = $entry->snippet->resourceId->videoId; 
+	$item_url = htmlentities('https://www.youtube.com/watch?v=' . $videoid); 
+	$item_title = htmlspecialchars($entry->snippet->title,ENT_QUOTES,'UTF-8');
+	$full_item_url = $my_install_url . $videoid . '.mp4?videoid='. $videoid .'&format=ipad';
 	$real_item_url = get_location($full_item_url); 
-	$large_photo = 'http://i.ytimg.com/vi/'. end($videoid) .'/0.jpg';
+	$large_photo = $entry->snippet->thumbnails->high->url;
 	$item_size = get_size($real_item_url);
 	$full_item_url = htmlentities($full_item_url); 
-	$item_description = htmlspecialchars($entry->content,ENT_QUOTES,'UTF-8');
+	$item_description = htmlspecialchars($entry->snippet->description,ENT_QUOTES,'UTF-8');
 	if ($item_description == '') {
-		$item_description = $item_title;
+		$item_description = $entry->snippet->description;
 	}
 	/* not clear why, but sometimes there are blank entries, which we ignore */ 
 	if($item_title != '') {
